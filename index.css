@@ -1,0 +1,44 @@
+/* Auto Background Generator extension styles */
+
+.auto-background-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 4px 0;
+}
+
+.auto-background-settings .auto-background-header h3 {
+    margin: 0 0 6px 0;
+    font-size: 1.1em;
+}
+
+.auto-background-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.auto-background-block > label {
+    font-weight: 600;
+}
+
+.auto-background-block small {
+    color: var(--text-secondary, #999);
+    font-size: 0.85em;
+}
+
+.auto-background-block input[type="number"],
+.auto-background-block select {
+    width: 100%;
+    max-width: 320px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #444);
+    background: var(--background-secondary, #222);
+    color: var(--text, #eee);
+}
+
+.auto-background-counter {
+    font-weight: 600;
+    color: var(--warning, #e0a000);
+}

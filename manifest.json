@@ -1,0 +1,8 @@
+{
+  "display_name": "Auto Background Generator",
+  "js": "index.js",
+  "css": "index.css",
+  "author": "filip",
+  "version": "1.0.0",
+  "auto_update": false
+}
