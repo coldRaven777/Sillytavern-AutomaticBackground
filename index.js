@@ -55,21 +55,78 @@ function settings() {
     return s;
 }
 
-// ---- Trigger the native image generation ----
-async function generateNow() {
+// ---- Success detection -------------------------------------------------
+// The /sd command does NOT throw when the backend is misconfigured — it just
+// shows a warning and resolves. So we watch for the actual result (either the
+// FORCE_SET_BACKGROUND event for background mode, or a new chat message that
+// carries media) before claiming success.
+function waitForImage(timeoutMs) {
+    return new Promise((resolve) => {
+        const ctx = getCtx && getCtx();
+        const chat = ctx && ctx.chat;
+        let done = false;
+        let timer = null;
+
+        const cleanup = () => {
+            if (timer) clearTimeout(timer);
+            eventSrc.off(eventTypes.FORCE_SET_BACKGROUND, onBg);
+            eventSrc.off(eventTypes.MESSAGE_RECEIVED, onMsg);
+        };
+        const finish = (ok, reason) => {
+            if (done) return;
+            done = true;
+            cleanup();
+            resolve({ ok, reason });
+        };
+
+        const onBg = (data) => {
+            if (data && (data.url || data.path)) finish(true);
+        };
+        const onMsg = (msg) => {
+            if (msg && Array.isArray(msg.extra?.media) && msg.extra.media.length) finish(true);
+        };
+
+        eventSrc.on(eventTypes.FORCE_SET_BACKGROUND, onBg);
+        eventSrc.on(eventTypes.MESSAGE_RECEIVED, onMsg);
+        timer = setTimeout(() => finish(false, 'timeout'), timeoutMs);
+    });
+}
+
+// ---- Trigger the native image generation -------------------------------
+async function generateNow({ manual = false } = {}) {
     const s = settings();
     const cmd = `/sd ${s.type}`;
+
+    // Start watching for the result BEFORE triggering, because the image is
+    // produced asynchronously (after the slash command returns).
+    const waitP = waitForImage(120000);
+
     try {
+        setStatus(manual ? 'Generating…' : 'Auto-generating…');
         toastr.info(`Auto Background: generating "${s.type}"…`);
         await executeSlash(cmd);
-        toastr.success(`Auto Background: "${s.type}" image generated.`);
     } catch (e) {
-        console.error('[auto-background] generation failed:', e);
-        toastr.error(`Auto Background: generation failed — ${e?.message || e}`);
+        console.error('[auto-background] trigger failed:', e);
+        setStatus('Error: ' + (e?.message || e));
+        toastr.error(`Auto Background: trigger failed — ${e?.message || e}`);
+        return;
+    }
+
+    const res = await waitP;
+    if (res.ok) {
+        setStatus('Last generation: success');
+        toastr.success(`Auto Background: "${s.type}" image set.`);
+    } else {
+        setStatus('Last generation: no image produced');
+        toastr.warning(
+            `Auto Background: no image was produced. ` +
+            `Check that Image Generation has a connected backend (A1111/ComfyUI/Forge/cloud) ` +
+            `and is enabled.`
+        );
     }
 }
 
-// ---- Turn counter ----
+// ---- Turn counter ------------------------------------------------------
 function onMessageReceived(msg) {
     if (!msg) return;
     // Only count genuine AI replies.
@@ -98,10 +155,15 @@ function resetCounter() {
     updateCounterLabel();
 }
 
-// ---- Settings UI ----
+// ---- Settings UI -------------------------------------------------------
 function updateCounterLabel() {
     const el = document.getElementById('auto-background-counter');
     if (el) el.textContent = String(turnsUntilNext);
+}
+
+function setStatus(text) {
+    const el = document.getElementById('auto-background-status');
+    if (el) el.textContent = text || '';
 }
 
 function buildSettings() {
@@ -129,6 +191,10 @@ function buildSettings() {
             <select id="auto-background-type"></select>
             <small>Background auto-applies the image as the chat background; others post to chat.</small>
         </div>
+        <div class="auto-background-block">
+            <button type="button" id="auto-background-now" class="menu_button">Generate now (test)</button>
+            <small id="auto-background-status"></small>
+        </div>
     `;
     container.appendChild(root);
 
@@ -138,7 +204,6 @@ function buildSettings() {
         const v = Math.max(1, Math.floor(Number(freqInput.value)) || 3);
         freqInput.value = v;
         s.frequency = v;
-        // Keep the countdown aligned with the new interval if not already due.
         if (turnsUntilNext <= 0) turnsUntilNext = v;
         s.turns_until_next = turnsUntilNext;
         saveFn();
@@ -158,10 +223,14 @@ function buildSettings() {
         saveFn();
     });
 
+    root.querySelector('#auto-background-now').addEventListener('click', () => {
+        generateNow({ manual: true });
+    });
+
     updateCounterLabel();
 }
 
-// ---- Boot ----
+// ---- Boot -------------------------------------------------------------
 jQuery(async () => {
     try {
         await load();
