@@ -8,6 +8,8 @@ let extSettings, saveFn, getCtx, eventSrc, eventTypes, executeSlash;
 
 // ---- Runtime state ----
 let turnsUntilNext = 3;
+let generating = false;       // re-entrancy guard: true while a generation is in flight
+let lastGenAt = 0;           // timestamp of the last generation (cooldown to kill feedback loops)
 
 // Generation modes exposed by SillyTavern's image generation, mapped to their
 // /sd trigger word. "background" is default and auto-applies the image to the chat.
@@ -97,32 +99,49 @@ async function generateNow({ manual = false } = {}) {
     const s = settings();
     const cmd = `/sd ${s.type}`;
 
-    // Start watching for the result BEFORE triggering, because the image is
-    // produced asynchronously (after the slash command returns).
-    const waitP = waitForImage(120000);
+    // Re-entrancy guard: never stack generations. This also kills the feedback
+    // loop where the generated image's own chat message would otherwise count
+    // as a new turn and immediately re-trigger generation.
+    if (generating) {
+        console.log('[auto-background] generation already in progress, skipping.');
+        return;
+    }
+    // Cooldown: ignore any auto-trigger arriving within 15s of the last one
+    // (catches media/system messages emitted by the SD extension itself).
+    if (!manual && Date.now() - lastGenAt < 15000) {
+        console.log('[auto-background] within cooldown, skipping auto-trigger.');
+        return;
+    }
 
+    generating = true;
     try {
+        // Start watching for the result BEFORE triggering, because the image is
+        // produced asynchronously (after the slash command returns).
+        const waitP = waitForImage(120000);
+
         setStatus(manual ? 'Generating…' : 'Auto-generating…');
         toastr.info(`Auto Background: generating "${s.type}"…`);
         await executeSlash(cmd);
+
+        const res = await waitP;
+        lastGenAt = Date.now();
+        if (res.ok) {
+            setStatus('Last generation: success');
+            toastr.success(`Auto Background: "${s.type}" image set.`);
+        } else {
+            setStatus('Last generation: no image produced');
+            toastr.warning(
+                `Auto Background: no image was produced. ` +
+                `Check that Image Generation has a connected backend (A1111/ComfyUI/Forge/cloud) ` +
+                `and is enabled.`
+            );
+        }
     } catch (e) {
         console.error('[auto-background] trigger failed:', e);
         setStatus('Error: ' + (e?.message || e));
         toastr.error(`Auto Background: trigger failed — ${e?.message || e}`);
-        return;
-    }
-
-    const res = await waitP;
-    if (res.ok) {
-        setStatus('Last generation: success');
-        toastr.success(`Auto Background: "${s.type}" image set.`);
-    } else {
-        setStatus('Last generation: no image produced');
-        toastr.warning(
-            `Auto Background: no image was produced. ` +
-            `Check that Image Generation has a connected backend (A1111/ComfyUI/Forge/cloud) ` +
-            `and is enabled.`
-        );
+    } finally {
+        generating = false;
     }
 }
 
