@@ -9,7 +9,7 @@ let extSettings, saveFn, getCtx, eventSrc, eventTypes, executeSlash;
 // ---- Runtime state ----
 let turnsUntilNext = 3;
 let generating = false;       // re-entrancy guard: true while a generation is in flight
-let lastGenAt = 0;           // timestamp of the last generation (cooldown to kill feedback loops)
+let lastTriggerAt = 0;        // timestamp of the last trigger (cooldown to absorb SD's own image message)
 
 // Generation modes exposed by SillyTavern's image generation, mapped to their
 // /sd trigger word. "background" is default and auto-applies the image to the chat.
@@ -57,15 +57,25 @@ function settings() {
     return s;
 }
 
+// SillyTavern emits MESSAGE_RECEIVED with either the full message object (main
+// script) or a bare message id (the SD extension does `emit(MESSAGE_RECEIVED,
+// messageId, 'extension')`). Resolve to the actual message either way.
+function resolveMessage(msg) {
+    if (msg && typeof msg === 'object') return msg;
+    if (typeof msg === 'number' || typeof msg === 'string') {
+        const chat = getCtx && getCtx().chat;
+        if (chat) return chat[Number(msg)];
+    }
+    return null;
+}
+
 // ---- Success detection -------------------------------------------------
 // The /sd command does NOT throw when the backend is misconfigured — it just
-// shows a warning and resolves. So we watch for the actual result (either the
-// FORCE_SET_BACKGROUND event for background mode, or a new chat message that
-// carries media) before claiming success.
+// shows a warning and resolves. So we watch for the actual result (the
+// FORCE_SET_BACKGROUND event for background mode, or a chat message that carries
+// media) before claiming success.
 function waitForImage(timeoutMs) {
     return new Promise((resolve) => {
-        const ctx = getCtx && getCtx();
-        const chat = ctx && ctx.chat;
         let done = false;
         let timer = null;
 
@@ -84,8 +94,9 @@ function waitForImage(timeoutMs) {
         const onBg = (data) => {
             if (data && (data.url || data.path)) finish(true);
         };
-        const onMsg = (msg) => {
-            if (msg && Array.isArray(msg.extra?.media) && msg.extra.media.length) finish(true);
+        const onMsg = (m) => {
+            const r = resolveMessage(m);
+            if (r && Array.isArray(r.extra?.media) && r.extra.media.length) finish(true);
         };
 
         eventSrc.on(eventTypes.FORCE_SET_BACKGROUND, onBg);
@@ -99,32 +110,32 @@ async function generateNow({ manual = false } = {}) {
     const s = settings();
     const cmd = `/sd ${s.type}`;
 
-    // Re-entrancy guard: never stack generations. This also kills the feedback
-    // loop where the generated image's own chat message would otherwise count
-    // as a new turn and immediately re-trigger generation.
+    // Re-entrancy guard: never stack generations.
     if (generating) {
         console.log('[auto-background] generation already in progress, skipping.');
         return;
     }
-    // Cooldown: ignore any auto-trigger arriving within 15s of the last one
-    // (catches media/system messages emitted by the SD extension itself).
-    if (!manual && Date.now() - lastGenAt < 15000) {
+    // Cooldown: ignore auto-triggers arriving within 30s of the last trigger.
+    // This absorbs the image message the SD extension emits right after a
+    // generation, so it can't immediately re-trigger. Manual runs bypass it.
+    if (!manual && Date.now() - lastTriggerAt < 30000) {
         console.log('[auto-background] within cooldown, skipping auto-trigger.');
         return;
     }
 
     generating = true;
+    lastTriggerAt = Date.now();
     try {
         // Start watching for the result BEFORE triggering, because the image is
         // produced asynchronously (after the slash command returns).
         const waitP = waitForImage(120000);
 
         setStatus(manual ? 'Generating…' : 'Auto-generating…');
+        console.log(`[auto-background] triggering: ${cmd}`);
         toastr.info(`Auto Background: generating "${s.type}"…`);
         await executeSlash(cmd);
 
         const res = await waitP;
-        lastGenAt = Date.now();
         if (res.ok) {
             setStatus('Last generation: success');
             toastr.success(`Auto Background: "${s.type}" image set.`);
@@ -147,13 +158,26 @@ async function generateNow({ manual = false } = {}) {
 
 // ---- Turn counter ------------------------------------------------------
 function onMessageReceived(msg) {
-    if (!msg) return;
+    const r = resolveMessage(msg);
+    if (!r) return;
+    console.log('[auto-background] message received:', {
+        is_user: r.is_user, is_system: r.is_system,
+        has_media: Array.isArray(r.extra?.media) && r.extra.media.length,
+    });
+
     // Only count genuine AI replies.
-    if (msg.is_user || msg.is_system) return;
+    if (r.is_user || r.is_system) return;
     // Skip image posts (the SD extension posts its generated image as a message).
-    if (Array.isArray(msg.extra?.media) && msg.extra.media.length) return;
+    if (Array.isArray(r.extra?.media) && r.extra.media.length) return;
 
     const s = settings();
+    // Don't let the SD extension's own image message (which can arrive while a
+    // generation is in flight) consume a turn.
+    if (generating || Date.now() - lastTriggerAt < 30000) {
+        console.log('[auto-background] ignoring message for counter (recent/active generation).');
+        return;
+    }
+
     turnsUntilNext -= 1;
 
     if (turnsUntilNext <= 0) {
