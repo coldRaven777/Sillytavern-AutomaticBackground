@@ -1,6 +1,6 @@
 // Auto Background Generator
-// Periodically triggers SillyTavern's native image generation (default: background)
-// every N chat turns and lets the generated image be set automatically.
+// Triggers SillyTavern's native image generation (default: background) on every
+// NORMAL user message send and lets the generated image be set as the chat background.
 const MODULE_NAME = 'auto-background';
 
 // ---- SillyTavern internals (loaded lazily) ----
@@ -25,9 +25,9 @@ const TYPE_OPTIONS = [
 
 function defaultSettings() {
     return {
-        frequency: 3,
+        frequency: 1,
         type: 'background',
-        turns_until_next: 3,
+        turns_until_next: 1,
     };
 }
 
@@ -156,25 +156,19 @@ async function generateNow({ manual = false } = {}) {
     }
 }
 
-// ---- Turn counter ------------------------------------------------------
-function onMessageReceived(msg) {
-    const r = resolveMessage(msg);
-    if (!r) return;
-    console.log('[auto-background] message received:', {
-        is_user: r.is_user, is_system: r.is_system,
-        has_media: Array.isArray(r.extra?.media) && r.extra.media.length,
-    });
-
-    // Only count genuine AI replies.
-    if (r.is_user || r.is_system) return;
-    // Skip image posts (the SD extension posts its generated image as a message).
-    if (Array.isArray(r.extra?.media) && r.extra.media.length) return;
+// ---- Trigger: fire on every NORMAL user message send --------------------
+// Hook GENERATION_STARTED and act only for type 'normal'. This excludes Silent,
+// Swipe, Continue, Personify, Regenerate and other send modes, plus automatic /
+// triggered generations. `frequency` throttles to every Nth normal send
+// (1 = every message).
+function onGenerationStarted(type, eventData) {
+    if (String(type).toLowerCase() !== 'normal') return;
+    if (eventData?.automatic_trigger) return;
 
     const s = settings();
-    // Don't let the SD extension's own image message (which can arrive while a
-    // generation is in flight) consume a turn.
+    // Don't let an in-flight generation consume a turn.
     if (generating || Date.now() - lastTriggerAt < 30000) {
-        console.log('[auto-background] ignoring message for counter (recent/active generation).');
+        console.log('[auto-background] ignoring generation start for counter (recent/active generation).');
         return;
     }
 
@@ -222,12 +216,12 @@ function buildSettings() {
     root.innerHTML = `
         <div class="auto-background-header">
             <h3>Auto Background Generator</h3>
-            <small>Automatically generates an image every N chat turns.</small>
+            <small>Generates a background on every Normal message send (every Nth if frequency &gt; 1).</small>
         </div>
         <div class="auto-background-block">
-            <label for="auto-background-frequency">Frequency (turns between generations)</label>
+            <label for="auto-background-frequency">Frequency (normal messages between generations)</label>
             <input type="number" id="auto-background-frequency" min="1" step="1" />
-            <small>Turns until next generation: <span class="auto-background-counter" id="auto-background-counter">${turnsUntilNext}</span></small>
+            <small>Messages until next generation: <span class="auto-background-counter" id="auto-background-counter">${turnsUntilNext}</span></small>
         </div>
         <div class="auto-background-block">
             <label for="auto-background-type">Image type to generate</label>
@@ -285,7 +279,7 @@ jQuery(async () => {
     settings();
     buildSettings();
 
-    eventSrc.on(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
+    eventSrc.on(eventTypes.GENERATION_STARTED, onGenerationStarted);
     eventSrc.on(eventTypes.CHAT_CHANGED, resetCounter);
 
     console.log('[auto-background] initialized.');
