@@ -25,9 +25,9 @@ const TYPE_OPTIONS = [
 
 function defaultSettings() {
     return {
-        frequency: 1,
+        frequency: 3,
         type: 'background',
-        turns_until_next: 1,
+        turns_until_next: 3,
     };
 }
 
@@ -166,22 +166,25 @@ function onGenerationStarted(type, eventData) {
     if (eventData?.automatic_trigger) return;
 
     const s = settings();
-    // Don't let an in-flight generation consume a turn.
-    if (generating || Date.now() - lastTriggerAt < 30000) {
-        console.log('[auto-background] ignoring generation start for counter (recent/active generation).');
-        return;
-    }
 
+    // Count every Normal send FIRST, so the label always ticks down — even while a
+    // generation is in flight or inside the cooldown window. Only the actual image
+    // generation is throttled by the guard below.
     turnsUntilNext -= 1;
-
-    if (turnsUntilNext <= 0) {
-        turnsUntilNext = s.frequency;
-        generateNow();
-    }
+    const hit = turnsUntilNext <= 0;
+    if (hit) turnsUntilNext = s.frequency;
 
     s.turns_until_next = turnsUntilNext;
     saveFn();
     updateCounterLabel();
+
+    // Throttle only the generation itself, not the counter.
+    if (generating || Date.now() - lastTriggerAt < 30000) {
+        console.log('[auto-background] generation skipped (recent/active), counter still advanced.');
+        return;
+    }
+
+    if (hit) generateNow();
 }
 
 function resetCounter() {
@@ -195,7 +198,10 @@ function resetCounter() {
 // ---- Settings UI -------------------------------------------------------
 function updateCounterLabel() {
     const el = document.getElementById('auto-background-counter');
-    if (el) el.textContent = String(turnsUntilNext);
+    if (!el) return;
+    const s = extSettings?.[MODULE_NAME];
+    // At frequency 1 there is nothing to count down — show a clear label instead.
+    el.textContent = (s && s.frequency === 1) ? 'every message' : String(turnsUntilNext);
 }
 
 function setStatus(text) {
