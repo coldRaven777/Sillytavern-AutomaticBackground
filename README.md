@@ -1,2 +1,2 @@
 # Sillytavern-AutomaticBackground
-A simple sillytavern extension that forces a generation of background every x turns
+A SillyTavern extension that auto-generates a background image on every Normal message send (optionally every Nth).
