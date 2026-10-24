@@ -34,7 +34,7 @@ function defaultSettings() {
 async function load() {
     const ext = await import('../../../extensions.js');
     extSettings = ext.extension_settings;
-    saveFn = ext.saveSettingsDebounced;
+    saveFn = sc.saveSettingsDebounced;
     getCtx = ext.getContext;
 
     const sc = await import('../../../../script.js');
@@ -162,37 +162,46 @@ async function generateNow({ manual = false } = {}) {
 // triggered generations. `frequency` throttles to every Nth normal send
 // (1 = every message).
 function onGenerationStarted(type, eventData) {
-    if (String(type).toLowerCase() !== 'normal') return;
-    if (eventData?.automatic_trigger) return;
+    try {
+        if (String(type).toLowerCase() !== 'normal') return;
+        if (eventData?.automatic_trigger) return;
 
-    const s = settings();
+        const s = settings();
 
-    // Count every Normal send FIRST, so the label always ticks down — even while a
-    // generation is in flight or inside the cooldown window. Only the actual image
-    // generation is throttled by the guard below.
-    turnsUntilNext -= 1;
-    const hit = turnsUntilNext <= 0;
-    if (hit) turnsUntilNext = s.frequency;
+        // Count every Normal send FIRST, so the label always ticks down — even while a
+        // generation is in flight or inside the cooldown window. Only the actual image
+        // generation is throttled by the guard below.
+        turnsUntilNext -= 1;
+        const hit = turnsUntilNext <= 0;
+        if (hit) turnsUntilNext = s.frequency;
 
-    s.turns_until_next = turnsUntilNext;
-    saveFn();
-    updateCounterLabel();
+        s.turns_until_next = turnsUntilNext;
+        saveFn();
+        updateCounterLabel();
 
-    // Throttle only the generation itself, not the counter.
-    if (generating || Date.now() - lastTriggerAt < 30000) {
-        console.log('[auto-background] generation skipped (recent/active), counter still advanced.');
-        return;
+        // Throttle only the generation itself, not the counter.
+        if (generating || Date.now() - lastTriggerAt < 30000) {
+            console.log('[auto-background] generation skipped (recent/active), counter still advanced.');
+            return;
+        }
+
+        if (hit) generateNow();
+    } catch (e) {
+        // Never let a failure here abort the generation flow (TTS, replies, etc.).
+        console.error('[auto-background] onGenerationStarted error:', e);
     }
-
-    if (hit) generateNow();
 }
 
 function resetCounter() {
-    const s = settings();
-    turnsUntilNext = s.frequency;
-    s.turns_until_next = turnsUntilNext;
-    saveFn();
-    updateCounterLabel();
+    try {
+        const s = settings();
+        turnsUntilNext = s.frequency;
+        s.turns_until_next = turnsUntilNext;
+        saveFn();
+        updateCounterLabel();
+    } catch (e) {
+        console.error('[auto-background] resetCounter error:', e);
+    }
 }
 
 // ---- Settings UI -------------------------------------------------------
