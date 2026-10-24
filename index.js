@@ -34,12 +34,12 @@ function defaultSettings() {
 async function load() {
     const ext = await import('../../../extensions.js');
     extSettings = ext.extension_settings;
-    saveFn = sc.saveSettingsDebounced;
     getCtx = ext.getContext;
 
     const sc = await import('../../../../script.js');
     eventSrc = sc.eventSource;
     eventTypes = sc.event_types;
+    saveFn = sc.saveSettingsDebounced;
 
     const sl = await import('../../../slash-commands.js');
     executeSlash = sl.executeSlashCommands;
