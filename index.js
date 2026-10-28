@@ -80,8 +80,13 @@ function waitForImage(timeoutMs) {
 
         const cleanup = () => {
             if (timer) clearTimeout(timer);
-            eventSrc.off(eventTypes.FORCE_SET_BACKGROUND, onBg);
-            eventSrc.off(eventTypes.MESSAGE_RECEIVED, onMsg);
+            if (typeof eventSrc.removeListener === 'function') {
+                eventSrc.removeListener(eventTypes.FORCE_SET_BACKGROUND, onBg);
+                eventSrc.removeListener(eventTypes.MESSAGE_RECEIVED, onMsg);
+            } else if (typeof eventSrc.off === 'function') {
+                eventSrc.off(eventTypes.FORCE_SET_BACKGROUND, onBg);
+                eventSrc.off(eventTypes.MESSAGE_RECEIVED, onMsg);
+            }
         };
         const finish = (ok, reason) => {
             if (done) return;
@@ -228,23 +233,30 @@ function buildSettings() {
     root.className = 'auto-background-settings';
 
     root.innerHTML = `
-        <div class="auto-background-header">
-            <h3>Auto Background Generator</h3>
-            <small>Generates a background on every Normal message send (every Nth if frequency &gt; 1).</small>
-        </div>
-        <div class="auto-background-block">
-            <label for="auto-background-frequency">Frequency (normal messages between generations)</label>
-            <input type="number" id="auto-background-frequency" min="1" step="1" />
-            <small>Messages until next generation: <span class="auto-background-counter" id="auto-background-counter">${turnsUntilNext}</span></small>
-        </div>
-        <div class="auto-background-block">
-            <label for="auto-background-type">Image type to generate</label>
-            <select id="auto-background-type"></select>
-            <small>Background auto-applies the image as the chat background; others post to chat.</small>
-        </div>
-        <div class="auto-background-block">
-            <button type="button" id="auto-background-now" class="menu_button">Generate now (test)</button>
-            <small id="auto-background-status"></small>
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>Auto Background Generator</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <div class="auto-background-block">
+                    <small>Generates a background on every Normal message send (every Nth if frequency &gt; 1).</small>
+                </div>
+                <div class="auto-background-block">
+                    <label for="auto-background-frequency">Frequency (normal messages between generations)</label>
+                    <input type="number" id="auto-background-frequency" class="text_pole" min="1" step="1" />
+                    <small>Messages until next generation: <span class="auto-background-counter" id="auto-background-counter">${turnsUntilNext}</span></small>
+                </div>
+                <div class="auto-background-block">
+                    <label for="auto-background-type">Image type to generate</label>
+                    <select id="auto-background-type" class="text_pole"></select>
+                    <small>Background auto-applies the image as the chat background; others post to chat.</small>
+                </div>
+                <div class="auto-background-block">
+                    <button type="button" id="auto-background-now" class="menu_button">Generate now (test)</button>
+                    <small id="auto-background-status"></small>
+                </div>
+            </div>
         </div>
     `;
     container.appendChild(root);
