@@ -110,21 +110,16 @@ async function generateNow({ manual = false } = {}) {
     const s = settings();
     const cmd = `/sd ${s.type}`;
 
-    // Re-entrancy guard: never stack generations.
+    // Re-entrancy guard: never stack generations. This is the only throttle —
+    // the `frequency` counter decides WHEN to generate; the `generating` flag
+    // only prevents two overlapping generations. (A 30s wall-clock cooldown used
+    // to live here and silently disabled the plugin during normal chatting.)
     if (generating) {
         console.log('[auto-background] generation already in progress, skipping.');
         return;
     }
-    // Cooldown: ignore auto-triggers arriving within 30s of the last trigger.
-    // This absorbs the image message the SD extension emits right after a
-    // generation, so it can't immediately re-trigger. Manual runs bypass it.
-    if (!manual && Date.now() - lastTriggerAt < 30000) {
-        console.log('[auto-background] within cooldown, skipping auto-trigger.');
-        return;
-    }
 
     generating = true;
-    lastTriggerAt = Date.now();
     try {
         // Start watching for the result BEFORE triggering, because the image is
         // produced asynchronously (after the slash command returns).
@@ -179,9 +174,14 @@ function onGenerationStarted(type, eventData) {
         saveFn();
         updateCounterLabel();
 
-        // Throttle only the generation itself, not the counter.
-        if (generating || Date.now() - lastTriggerAt < 30000) {
-            console.log('[auto-background] generation skipped (recent/active), counter still advanced.');
+        // Throttle only the generation itself, not the counter. The `generating`
+        // flag (not a wall-clock cooldown) is the guard: it prevents re-triggering
+        // while an image is actually in flight. A time-based cooldown broke the
+        // plugin during normal chatting — every send after the first stayed within
+        // 30s of the last one, so the counter kept advancing but no image was ever
+        // produced ("generates once then never").
+        if (generating) {
+            console.log('[auto-background] generation skipped (already in progress), counter still advanced.');
             return;
         }
 
