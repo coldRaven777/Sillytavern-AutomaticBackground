@@ -9,7 +9,6 @@ let extSettings, saveFn, getCtx, eventSrc, eventTypes, executeSlash;
 // ---- Runtime state ----
 let turnsUntilNext = 3;
 let generating = false;       // re-entrancy guard: true while a generation is in flight
-let lastTriggerAt = 0;        // timestamp of the last trigger (cooldown to absorb SD's own image message)
 
 // Generation modes exposed by SillyTavern's image generation, mapped to their
 // /sd trigger word. "background" is default and auto-applies the image to the chat.
